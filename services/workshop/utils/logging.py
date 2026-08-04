@@ -13,6 +13,44 @@
 
 
 import logging
+import re
+
+
+_SENSITIVE_FIELDS = re.compile(
+    r'(password|passwd|secret|token|api[_-]?key|auth|credential|credit[_-]?card'
+    r'|cvv|cvc|ssn|pin|otp|access[_-]?key|private[_-]?key)',
+    re.IGNORECASE,
+)
+
+_REDACTED = '***REDACTED***'
+
+
+def sanitize_params(params):
+    """
+    Sanitize request parameters by redacting values of sensitive fields.
+
+    Returns a copy with sensitive values replaced by ***REDACTED***.
+    Non-dict params are returned unchanged.
+    """
+    if not isinstance(params, dict):
+        return params
+
+    sanitized = {}
+    for key, value in params.items():
+        if _SENSITIVE_FIELDS.search(str(key)):
+            sanitized[key] = _REDACTED
+        elif isinstance(value, dict):
+            sanitized[key] = sanitize_params(value)
+        elif isinstance(value, list):
+            sanitized[key] = [
+                sanitize_params(v) if isinstance(v, dict) else (
+                    _REDACTED if isinstance(v, str) and _SENSITIVE_FIELDS.search(str(key)) else v
+                )
+                for v in value
+            ]
+        else:
+            sanitized[key] = value
+    return sanitized
 
 
 def log_error(url, params, status_code, message):
@@ -23,4 +61,5 @@ def log_error(url, params, status_code, message):
     :param message: The message of the error.
     :return:
     """
-    logging.getLogger().error(f"{url} - {params} - {status_code} -{message}")
+    safe_params = sanitize_params(params)
+    logging.getLogger().error(f"{url} - {safe_params} - {status_code} -{message}")
